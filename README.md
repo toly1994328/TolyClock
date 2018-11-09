@@ -1,738 +1,386 @@
 #### 零、前言
->1.canvas本身提供了很多绘制基本图形的方法，普通绘制基本满足  
-2.但是更高级的绘制canvas便束手无策，但它的一个方法却将图形的绘制连接到了另一个次元  
-3.下面进入Path的世界，[注]:本文只说Path，关于绘制只要使用`Canvas.drawPath(Path,Paint)`即可  
-4.本文将对Path的`所有API`进行测试。
 
+>前几天介绍了一大堆Android的Canvas，Paint,Path的API，接下来将是灵活地使用他们  
+今天带来的是一个手表的绘制，经过本篇的洗礼，相信你会对Canvas的`图层`概念有更深刻的理解  
+至于表的美丑不是本文的重点，本文只有一个目的，就是理清Canvas的save和restore的意义
 
----
-#### 一、引：认识Path
-
-##### 例1.绘制网格
->在Canvas篇我用Path画过一个网格辅助，在这里分析一下  
-moveTo相当于抬笔到某点，lineTo表示画下到某点
-
-```
-    /**
-     * 绘制网格:注意只有用path才能绘制虚线
-     *
-     * @param step    小正方形边长
-     * @param winSize 屏幕尺寸
-     */
-    public static Path gridPath(int step, Point winSize) {
-        //创建path
-        Path path = new Path();
-        //每间隔step,将笔点移到(0, step * i)，然后画线到(winSize.x, step * i)
-        for (int i = 0; i < winSize.y / step + 1; i++) {
-            path.moveTo(0, step * i);
-            path.lineTo(winSize.x, step * i);
-        }
-
-        for (int i = 0; i < winSize.x / step + 1; i++) {
-            path.moveTo(step * i, 0);
-            path.lineTo(step * i, winSize.y);
-        }
-        return path;
-    }
-```
-
-```
-//准备画笔
-mRedPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-mRedPaint.setColor(Color.RED);
-mRedPaint.setStrokeWidth(2);
-mRedPaint.setStyle(Paint.Style.STROKE);
-//设置虚线效果new float[]{可见长度, 不可见长度},偏移值
-mRedPaint.setPathEffect(new DashPathEffect(new float[]{10, 5}, 0)); 
-
-//绘制
-Path path = HelpPath.gridPath(50, mWinSize);
-canvas.drawPath(path, mRedPaint);
-```
-
-
-![path画线.png](https://upload-images.jianshu.io/upload_images/9414344-49bf12ee49a220f0.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+![表.gif](https://upload-images.jianshu.io/upload_images/9414344-e7a3f0628b0c5b46.gif?imageMogr2/auto-orient/strip)
 
 ---
+#### 一、准备工作
 
-##### 例2.绘制N角星  
+##### 1.新建类继承View
 
->曾经花了半天研究五角星的构造，通过两个圆，发现了N角星绘制的通法  
-又用半天用JavaScript的Canvas实现了在浏览器上的绘制，当然Android也不示弱：
-
-![mmexport1541469593236.jpg](https://upload-images.jianshu.io/upload_images/9414344-38e2b7173937c7d9.jpg?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-##### 1).通用n角星路径绘制:(基本上都是一些点位和角度的计算，然后连线)
-
-```
-/**
- * n角星路径
- *
- * @param num 几角星
- * @param R   外接圆半径
- * @param r   内接圆半径
- * @return n角星路径
- */
-public static Path nStarPath(int num, float R, float r) {
-    Path path = new Path();
-    float perDeg = 360 / num;
-    float degA = perDeg / 2 / 2;
-    float degB = 360 / (num - 1) / 2 - degA / 2 + degA;
-    path.moveTo(
-            (float) (Math.cos(rad(degA + perDeg * 0)) * R + R * Math.cos(rad(degA))),
-            (float) (-Math.sin(rad(degA + perDeg * 0)) * R + R));
-    for (int i = 0; i < num; i++) {
-        path.lineTo(
-                (float) (Math.cos(rad(degA + perDeg * i)) * R + R * Math.cos(rad(degA))),
-                (float) (-Math.sin(rad(degA + perDeg * i)) * R + R));
-        path.lineTo(
-                (float) (Math.cos(rad(degB + perDeg * i)) * r + R * Math.cos(rad(degA))),
-                (float) (-Math.sin(rad(degB + perDeg * i)) * r + R));
-    }
-    path.close();
-    return path;
-}   
-
-/**
- * 角度制化为弧度制
- *
- * @param deg 角度
- * @return 弧度
- */
-public static float rad(float deg) {
-    return (float) (deg * Math.PI / 180);
-}
-```
-
-##### 2).当外接圆和内切圆的半径成一定的关系，可形成正多角星，和正多边形
-
->正多角星:
-
-
-```
-    /**
-     * 画正n角星的路径:
-     *
-     * @param num 角数
-     * @param R   外接圆半径
-     * @return 画正n角星的路径
-     */
-    public static Path regularStarPath(int num, float R) {
-        float degA, degB;
-        if (num % 2 == 1) {//奇数和偶数角区别对待
-            degA = 360 / num / 2 / 2;
-            degB = 180 - degA - 360 / num / 2;
-        } else {
-            degA = 360 / num / 2;
-            degB = 180 - degA - 360 / num / 2;
-        }
-        float r = (float) (R * Math.sin(rad(degA)) / Math.sin(rad(degB)));
-        return nStarPath(num, R, r);
-    }
-```
-
->正多边形：
-
-```
-    /**
-     * 画正n边形的路径
-     *
-     * @param num 边数
-     * @param R   外接圆半径
-     * @return 画正n边形的路径
-     */
-    public static Path regularPolygonPath(int num, float R) {
-        float r = (float) (R * (Math.cos(rad(360 / num / 2))));//!!一点解决
-        return nStarPath(num, R, r);
-    }
-
-    /**
-     * 角度制化为弧度制
-     *
-     * @param deg 角度
-     * @return 弧度
-     */
-    public static float rad(float deg) {
-        return (float) (deg * Math.PI / 180);
-    }
-```
-
-
-
-![n角星](https://upload-images.jianshu.io/upload_images/9414344-b8c986e32208259a.png)
-
->这两个小栗子作为引，应该对Path的能为有一定的了解了吧,下面将正式对Path做系统地介绍
----
-
-##### 二、Path的详细介绍
-
->Path定位：
-是一个类，直接继承自Object，源码行数879(一盏茶的功夫就看完了)，算个小类   
-`但`native方法很多，说明它跟底层打交道的，感觉不好惹  
-下面看一下Path的公共方法：(基本创建相关、添加相关、设置相关，其他)  
-`注：为了好看，以下所有演示为横屏且canvas的坐标原点移至(800,500),所有蓝线为辅助线`
-
-
-![Path一览.png](https://upload-images.jianshu.io/upload_images/9414344-490cd64003f6027f.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
----
-
-##### 1.moveTo----lineTo----close
->moveTo：抬笔到某点  
-lineTo：画线到某点  
-close：闭合首位  
-
-```
-Path path = new Path();
-path.moveTo(0, 0);
-path.lineTo(100, 200);
-```
-
-![画线.png](https://upload-images.jianshu.io/upload_images/9414344-6530e6920cf55de8.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-
-```
-Path path = new Path();
-path.moveTo(0, 0);
-path.lineTo(100, 200);
-path.lineTo(200, 100);
-```
-
-![画线2.png](https://upload-images.jianshu.io/upload_images/9414344-5807531d211adc45.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-
-```
-Path path = new Path();
-path.moveTo(0, 0);
-path.lineTo(100, 200);
-path.lineTo(200, 100);
-path.close();
-```
-
-![close.png](https://upload-images.jianshu.io/upload_images/9414344-417ccea046e39110.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-
----
-##### 2.rMoveTo----rLineTo
->rMoveTo：从路径尾部为起点，抬笔  
-rLineTo：从路径尾部为起点，画直线   
-其实也不难理解，就是点的参考系从canvas左上角移变成路径尾部，看一下就知道了：
-
-```
-Path path = new Path();
-path.rMoveTo(0,0);
-path.rLineTo(100, 200);
-path.rLineTo(200, 100);
-path.close();
-```
-
-![rlineto.png](https://upload-images.jianshu.io/upload_images/9414344-4d7f15d602741d90.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
----
-
-##### 3.绘制弧：arcTo(矩形范围，起点，终点，)
-
-```
-RectF rectF = new RectF(100, 100, 500, 300);
-path.moveTo(0, 0);
-//arcTo(矩形范围，起点，终点，是否独立--默认false)
-//path.arcTo(rectF, 0, 45, true);
-path.arcTo(rectF, 0, 45, false);
-
-```
-
-![绘制弧线.png](https://upload-images.jianshu.io/upload_images/9414344-873a98d613f8af21.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
->剩下的贝塞尔曲线这个大头放在本篇最后
-
-
----
-#### 三、路径添加：addXXX
-
->可以看出齐刷刷的Direction，先看看它是什么鬼：  
-是一个枚举，只有CW(顺时针)和CCW(逆时针)，这里暂且按下，都使用CW,后文详述：
-
-```
-    public enum Direction {
-        /** clockwise */
-        CW  (0),    // must match enum in SkPath.h---顺时针
-        /** counter-clockwise */
-        CCW (1);    // must match enum in SkPath.h---逆时针
-
-        Direction(int ni) {
-            nativeInt = ni;
-        }
-        final int nativeInt;
-    }
-```
-
----
-
-##### 1.加矩形路径：
-
-###### 1).普通矩形:addRect(左,上,右,下)
-
-```
-RectF rectF = new RectF(100, 100, 500, 300);
-path.addRect(rectF, Path.Direction.CW);//顺时针画矩形
-```
-
-###### 2).圆角矩形：addRoundRect(矩形域,圆角x，圆角y)
-
-```
-RectF rectF = new RectF(100, 100, 500, 300);
-path.addRoundRect(rectF, 50, 50, Path.Direction.CW);//顺时针画圆角矩形
-```
-
-###### 3).用4点控制圆角：addRoundRect(矩形域,8数，方向)
-
-```
-RectF rectF = new RectF(100, 100, 500, 300);
-path.addRoundRect(rectF, new float[]{
-        150, 150,//左上圆角x,y
-        0, 0,//右上圆角x,y
-        450, 250,//右下圆角x,y
-        250, 200//左下圆角x,y
-}, Path.Direction.CW);//顺时针画
-```
-
-![矩形相关.png](https://upload-images.jianshu.io/upload_images/9414344-f0b686f8fdbf3da7.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
----
-
-##### 2.加椭圆路径：addOval(矩形域，方向)
-
-```
-RectF rectF = new RectF(100, 100, 500, 300);
-path.addOval(rectF, Path.Direction.CW);
-```
-
-![绘制椭圆.png](https://upload-images.jianshu.io/upload_images/9414344-fd88469622c8abbf.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
----
-
-##### 3.加圆路径：addCircle(圆心x,圆心y,方向)
-
-
-```
-path.addCircle(100,100,100,Path.Direction.CW);
-```
-
-![圆.png](https://upload-images.jianshu.io/upload_images/9414344-0d8f1b5bf218a358.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
----
-
-##### 4.加弧线路径：addArc(矩形域,起始角度终止角度)
-
-```
-RectF rectF = new RectF(100, 100, 500, 300);
-path.addArc(rectF,0,145);
-```
-
-![弧线.png](https://upload-images.jianshu.io/upload_images/9414344-54d7d86ada45e371.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-##### 5.添加路径：
-###### 1).普通添加addPath(Path)
-
-```
-path.addCircle(100,100,100,Path.Direction.CW);
-Path otherPath = new Path();
-otherPath.moveTo(0, 0);
-otherPath.lineTo(100, 100);
-path.addPath(otherPath);
-```
-
-
-###### 2).偏移添加：addPath(Path，偏移x,偏移y)
-
-```
-path.addCircle(100,100,100,Path.Direction.CW);
-Path otherPath = new Path();
-otherPath.moveTo(0, 0);
-otherPath.lineTo(100, 100);
-path.addPath(otherPath,200,200);
 ```
+public class TolyClockView extends View {
 
-
-###### 3).矩阵变换添加：addPath(Path，Matrix)
-
-```
-path.addCircle(100,100,100,Path.Direction.CW);
-Path otherPath = new Path();
-otherPath.moveTo(0, 0);
-otherPath.lineTo(100, 100);
-
-Matrix matrix = new Matrix();
-matrix.setValues(new float[]{
-        1, 0, 100,
-        0, .5f, 150,
-        0, 0, 1
-});
-path.addPath(otherPath, matrix);
-```
-
-
-
-![添加路径.png](https://upload-images.jianshu.io/upload_images/9414344-cf2398edc420b028.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
----
-##### 四、其他操作：
-##### 1.细碎小点综述:
-
-```
-        path.reset();//清空path,保留填充类型
-        //path.rewind();//清空path,保留数据结构
-        path.isEmpty()//是否为空
-        path.isRect(new RectF());
-        path.isConvex();
-        path.isInverseFillType();
-
-        path.set(otherPath);//清空path后添加新Path
-//        path.offset(200,200);//平移
-//        path.transform(matrix);//矩阵变换
-
-        Path tempPath = new Path();
-//        path.offset(200, 200, tempPath);//基于path平移注入tempPath，path不变
-        path.transform(matrix, tempPath);//基于path变换注入tempPath，path不变
-
-        canvas.drawPath(path, mRedPaint);
-        canvas.drawPath(tempPath, mRedPaint);
-```
-
-##### 2.顺时针CW和逆时针CCW的区别
-
-###### 1).setLastPoint(x,y):设置最后一点
-
->Path相当于将点按顺序保存，setLastPoint(x,y)方法则是将最后一个点换掉
-
-```
-RectF rectF = new RectF(100, 100, 500, 300);
-path.addRect(rectF, Path.Direction.CW);//顺时针画矩形
-path.setLastPoint(200, 200);
-canvas.drawPath(path, mRedPaint);
-```
-
-![顺时针.png](https://upload-images.jianshu.io/upload_images/9414344-49b1465d5ee0696b.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-
-```
-RectF rectF = new RectF(100, 100, 500, 300);
-path.addRect(rectF, Path.Direction.CCW);//顺时针画矩形
-path.setLastPoint(200, 200);
-canvas.drawPath(path, mRedPaint);
-```
-
-![逆时针.png](https://upload-images.jianshu.io/upload_images/9414344-d2aa3936f120cd1c.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-##### 3.边界计算：
-
-```
-Path starPath = CommonPath.nStarPath(6, 100, 50);
-RectF rectF = new RectF();//自备矩形区域
-starPath.computeBounds(rectF, true);
-canvas.drawPath(starPath, mRedPaint);
-canvas.drawRect(rectF,mHelpPaint);
-```
-
-![查看矩形路径区域.png](https://upload-images.jianshu.io/upload_images/9414344-1cadfb235f33b6cb.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
----
-#### 五、路径的填充
-
-##### 1.初识路径的填充：
-
-###### 1)左图：两个都是顺时针：
-
-```
-mRedPaint.setStyle(Paint.Style.FILL);
-RectF rectF = new RectF(100, 100, 500, 300);
-path.addRect(rectF, Path.Direction.CW);//顺时针画矩形
-path.addRect(200, 0, 400, 400, Path.Direction.CW);//顺时针画矩形
-```
-
-###### 2)右图：横的顺时针,竖的逆时针
-
-```
-mRedPaint.setStyle(Paint.Style.FILL);
-RectF rectF = new RectF(100, 100, 500, 300);
-path.addRect(rectF, Path.Direction.CW);//顺时针画矩形
-path.addRect(200, 0, 400, 400, Path.Direction.CCW);//逆时针画矩形
-```
-
-![填充.png](https://upload-images.jianshu.io/upload_images/9414344-81ac8a8a803da5b6.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
->感觉向两个水涡，同向加剧，反向中间就抵消了
-
-##### 2.填充的环绕原则：---在自然科学(如数学，物理学)中的概念
->非零环绕原则(WINDING)----默认  
-反零环绕原则(INVERSE_WINDING)  
-奇偶环绕原则(EVEN_ODD)  
-反奇偶环绕原则(INVERSE_EVEN_ODD)  
-
-
-```
-  public enum FillType {
-        WINDING         (0),
-        EVEN_ODD        (1),
-        INVERSE_WINDING (2),
-        INVERSE_EVEN_ODD(3);
-        FillType(int ni) {
-            nativeInt = ni;
-        }
-        final int nativeInt;
-    }
-```
-
-```
-Path.FillType fillType = path.getFillType();//获取类型
-path.setFillType(Path.FillType.XXXXXX)//设置类型
-```
-
-
-```
-//绘制的测试五角星
-path.moveTo(100, 200);
-path.lineTo(500, 200);
-path.lineTo(200, 400);
-path.lineTo(300, 50);
-path.lineTo(400, 400);
-path.close();
-```
-
----
-
-###### 1).非零环绕数规则：WINDING
-
-根据我个人的理解(仅供参考)：在非零环绕数规则下
-
-```
-判断一点在不在图形内：从点引射线P，
-遇到顺时针边+1
-遇到逆时针边-1
-结果0，不在，否则，在
-```
-
-![非零环绕.png](https://upload-images.jianshu.io/upload_images/9414344-35b500cef8a74bea.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-
-
----
-
-###### 2).奇偶环绕数规则：EVEN_ODD
-
-根据我个人的理解(仅供参考)：奇偶环绕数规则
-
-```
-判断一点在不在图形内(非定点)：
-从点引射线P，看与图形交点个数
-奇数在，偶数，不在
-```
-
-![奇偶环绕.png](https://upload-images.jianshu.io/upload_images/9414344-3c3fdd9b55ef399b.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-
-###### 3).反非零环绕数规则和反奇偶环绕数规则：
->就是和上面相比，该填充的不填充，不填充的填充
-
-![反环绕.png](https://upload-images.jianshu.io/upload_images/9414344-cc72c687f829113e.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
->这样看来图形的顺时针或逆时针绘制对于填充是非常重要的  
-综合来说奇偶原则比较简单粗暴,但非零原则作为默认方式体现了它的通用性
-
----
-
-#### 六、布尔运算OP：(两个路径之间的运算)
->如果说环绕原则是一个Path的自我纠结，那么OP就是两个路径之间的勾心斗角
-
-```
-Path right = new Path();
-Path left = new Path();
-left.addCircle(0, 0, 100, Path.Direction.CW);
-right.addCircle(100, 0, 100, Path.Direction.CW);
-//left.op(right, Path.Op.DIFFERENCE);//差集----晕，咬了一口硫酸
-//left.op(right, Path.Op.REVERSE_DIFFERENCE);//反差集----赔了夫人又折兵
-//left.op(right, Path.Op.INTERSECT);//交集----与你不同的都不是我
-//left.op(right, Path.Op.UNION);//并集----在一起，在一起
-left.op(right, Path.Op.XOR);//异或集---我恨你，我也恨你
-
-canvas.drawPath(left, mRedPaint);
-```
-
-![op.png](https://upload-images.jianshu.io/upload_images/9414344-dd03f9ca06045546.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-
----
-七、Path动画：PathMeasure
-
-##### init方法里：
-
-```
-//测量路径
-PathMeasure pathMeasure = new PathMeasure(mStarPath, false);
-//使用ValueAnimator
-ValueAnimator pathAnimator = ValueAnimator.ofFloat(1, 0);
-pathAnimator.setDuration(5000);
-pathAnimator.addUpdateListener(animation -> {
-    float value = (Float) animation.getAnimatedValue();
-    //使用画笔虚线效果+偏移
-    DashPathEffect effect = new DashPathEffect(
-            new float[]{pathMeasure.getLength(), pathMeasure.getLength()},
-            value * pathMeasure.getLength());
-    mRedPaint.setPathEffect(effect);
-    invalidate();
-});
-pathAnimator.start();
-```
-
-##### OnDraw方法里：
-
-```
-canvas.drawPath(mStarPath, mRedPaint);
-```
-
-
-![路径动画.gif](https://upload-images.jianshu.io/upload_images/9414344-3640f6acd1d11ade.gif?imageMogr2/auto-orient/strip)
-
-
-
----
-#### 八、贝塞尔曲线简述：
->如果说Path是Canvas为了高级绘制留下的窗子那么贝塞尔曲线则Path为了更高级的绘制而留下的门  
-由于操作的复杂性，这里并不过渡深入，以后有需求的话会专门开一篇
-
-
-##### 1.简单认识：(图来源网络)
-
-一阶贝塞尔 | 二阶贝塞尔|三阶贝塞尔
----|---|---
-![](https://upload-images.jianshu.io/upload_images/9414344-5ea037e331e6ca67.gif?imageMogr2/auto-orient/strip) | ![](https://upload-images.jianshu.io/upload_images/9414344-8ca85f8b4c880636.gif?imageMogr2/auto-orient/strip)|![](https://upload-images.jianshu.io/upload_images/9414344-88f96432bee47f53.gif?imageMogr2/auto-orient/strip)
-
-
-##### 2.二阶贝塞尔曲线示例：
-
-```
-public class Bezier2View extends View {
-    private Paint mHelpPaint;//辅助画笔
-    private Paint mPaint;//贝塞尔曲线画笔
-    private Path mBezierPath;//贝塞尔曲线路径
-    //起点
-    private PointF start = new PointF(0, 0);
-    //终点
-    private PointF end = new PointF(400, 0);
-    //控制点
-    private PointF control = new PointF(200, 200);
-    private Picture mPicture;//坐标系和网格的Canvas元件
-    private Point mCoo;//坐标系
-    public Bezier2View(Context context) {
+    public TolyClockView(Context context) {
         this(context, null);
     }
 
-    public Bezier2View(Context context, @Nullable AttributeSet attrs) {
+    public TolyClockView(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
+
         init();
     }
 
     private void init() {
-        //贝塞尔曲线画笔
-        mPaint = new Paint();
-        mPaint.setStyle(Paint.Style.STROKE);
-        mPaint.setColor(Color.parseColor("#88EC17F3"));
-        mPaint.setStrokeWidth(8);
-        //辅助线画笔
-        resetHelpPaint();
-        recordBg();//初始化时录制坐标系和网格--避免在Ondraw里重复调用
-        mBezierPath = new Path();
+        //TODO 初始化
     }
-
-    /**
-     * 初始化时录制坐标系和网格--避免在Ondraw里重复调用
-     */
-    private void recordBg() {
-        //准备屏幕尺寸
-        Point winSize = new Point();
-        mCoo = new Point(800, 500);
-        Utils.loadWinSize(getContext(), winSize);
-        Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        mPicture = new Picture();
-        Canvas recordCanvas = mPicture.beginRecording(winSize.x, winSize.y);
-        //绘制辅助网格
-        HelpDraw.drawGrid(recordCanvas, winSize, gridPaint);
-        //绘制坐标系
-        HelpDraw.drawCoo(recordCanvas, mCoo, winSize, gridPaint);
-        mPicture.endRecording();
-    }
-
-    /**
-     * 重置辅助画笔
-     */
-    private void resetHelpPaint() {
-        mHelpPaint = new Paint();
-        mHelpPaint.setColor(Color.BLUE);
-        mHelpPaint.setStrokeWidth(2);
-        mHelpPaint.setStyle(Paint.Style.STROKE);
-        mHelpPaint.setPathEffect(new DashPathEffect(new float[]{10, 5}, 0));
-        mHelpPaint.setStrokeCap(Paint.Cap.ROUND);
-    }
-
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        // 根据触摸位置更新控制点，并提示重绘
-        control.x = event.getX() - mCoo.x;
-        control.y = event.getY() - mCoo.y;
-        invalidate();
-        return true;
-    }
-
-    @Override
+    
+       @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        canvas.save();
-        canvas.translate(mCoo.x, mCoo.y);
-        drawHelpElement(canvas);//绘制辅助工具--控制点和基准选
-        // 绘制贝塞尔曲线
-        mBezierPath.moveTo(start.x, start.y);
-        mBezierPath.quadTo(control.x, control.y, end.x, end.y);
-        canvas.drawPath(mBezierPath, mPaint);
-        mBezierPath.reset();//清空mBezierPath
-        canvas.restore();
-        canvas.drawPicture(mPicture);
+        //TODO 绘制
     }
-    /**
-     * 绘制辅助工具--控制点和基准选
-     *
-     * @param canvas
-     */
-    private void drawHelpElement(Canvas canvas) {
-        // 绘制数据点和控制点
-        mHelpPaint.setColor(Color.parseColor("#8820ECE2"));
-        mHelpPaint.setStrokeWidth(20);
-        canvas.drawPoint(start.x, start.y, mHelpPaint);
-        canvas.drawPoint(end.x, end.y, mHelpPaint);
-        canvas.drawPoint(control.x, control.y, mHelpPaint);
-        // 绘制辅助线
-        resetHelpPaint();
-        canvas.drawLine(start.x, start.y, control.x, control.y, mHelpPaint);
-        canvas.drawLine(end.x, end.y, control.x, control.y, mHelpPaint);
-    }
-}
 ```
->效果如下：(模拟器+录屏软件+AS有点卡，手机上演示很流畅的)
-![二阶贝塞尔.gif](https://upload-images.jianshu.io/upload_images/9414344-898883aa9751e26e.gif?imageMogr2/auto-orient/strip)
+
+##### 2.分析一下
+
+>一般我们都会这样去自定义一个View,但很少人会有`图层`这个概念，毕竟咱都是敲代码的   
+如下图，一开始是一个x,y轴在顶点的图层,如果你不用save(),那你始终都在这个图层，图层栈始终只有一个  
+
+![开始绘制时.png](https://upload-images.jianshu.io/upload_images/9414344-7aaf25742a62ce32.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
 
 ---
 
-3.三阶贝塞尔的简单演示：
+##### 3.下面在这个界面上绘制本人专用坐标系:(已封装成工具，`附在文尾`)
+>网格和坐标系属于辅助性的工具，绘制起来比较多,所以使用Picture录制，在init()里初始化  
+Picture在onDraw里绘制高效些，区别就像`准备一车砖盖房子和造一块才砖盖一下房子`  
+
+###### 
 
 ```
-mRedPaint.setStrokeWidth(5);
-mRedPaint.setStrokeCap(Paint.Cap.ROUND);
-path.moveTo(0, 0);//定点1_x,定点1_y
-//(控制点1_X，控制点1_y,控制点2_x，控制点2_y,定点2_x,定点2_y)
-path.cubicTo(100, 100, 300, -300, 600, 0);
+//成员变量
+private Picture mPictureGrid;//网格Canvas元件
+private Point mCoo = new Point(500, 800);//坐标系原点
+private Picture mPictureCoo;//坐标系Canvas元件
+
+//init()中
+mPictureGrid = HelpDraw.getGrid(getContext());
+mPictureCoo = HelpDraw.getCoo(getContext(), mCoo);
+//初始化画笔
+mMainPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+mMainPaint.setStyle(Paint.Style.STROKE);
+mMainPaint.setStrokeCap(Paint.Cap.ROUND);
+
+//onDraw里
+canvas.drawPicture(mPictureGrid);
+canvas.drawPicture(mPictureCoo);
 ```
 
-![三阶贝塞尔.png](https://upload-images.jianshu.io/upload_images/9414344-de693201615367e5.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+>正如API字面上的意思，在canvas上将网格和坐标系两张`图片`绘制出来,如下图：
 
->好了，Path完结散花
+
+![绘制坐标系时.png](https://upload-images.jianshu.io/upload_images/9414344-e3bbe8aa14762ef1.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+
+
+---
+#### 二、绘制逻辑
+>准备工作做好了，下面要到正题了
+
+##### 1.onDraw里
+```
+canvas.save();//保存先前状态(相当于在另一个图层操作)
+canvas.translate(mCoo.x, mCoo.y);//将画布定点平移到绘制的坐标系中心
+canvas.restore();//合并到root图层
+```
+
+##### 2.看一下这两句翻译在图上是什么意思：  
+>一旦canvas.save()，相当于新建了一个图层(黑色虚线所示),  
+然后canvas.translate(mCoo.x, mCoo.y)将新建的图层向右和向下移动    
+新建的图层的好处:只有栈顶的图层才能操作(如Canvas移动时，root图层并没有动，这正是我们想要的)
+
+
+![save和translate.png](https://upload-images.jianshu.io/upload_images/9414344-9ece979946771e62.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+##### 3.绘制外圈破碎的圆:drawBreakCircle(canvas)
+
+
+```
+ /**
+ * 绘制破碎的圆
+ * @param canvas
+ */
+private void drawBreakCircle(Canvas canvas) {
+    for (int i = 0; i < 4; i++) {
+        canvas.save();//保存先前状态(相当于在另一个图层操作)
+        canvas.rotate(90 * i);
+        mMainPaint.setStrokeWidth(8);
+        mMainPaint.setColor(Color.parseColor("#D5D5D5"));
+        //在-350, -350, 350, 350的矩形区域,从10°扫70°绘制圆弧
+        canvas.drawArc(
+                -350, -350, 350, 350,
+                10, 70, false, mMainPaint);
+        canvas.restore();//恢复先前状态(相当于将图层和前一图层合并)
+    }
+}     
+```
+
+>先看i=0时：  
+由于save了，前面的图层被锁定，相当于在另一个图层操作
+
+![绘制碎圆.png](https://upload-images.jianshu.io/upload_images/9414344-27062a46ce8684ef.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+> `canvas.restore()`调用后，   
+图层2将它的结果给了图层1，`挥挥衣袖，不带走一片云彩`，出栈了
+
+![绘制碎圆2.png](https://upload-images.jianshu.io/upload_images/9414344-7e0a6d7ad90b3a9b.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+>先看i=1时：  
+由于save了，前面的图层被锁定，相当于在另一个图层操作  
+这里canvas.rotate(90 * 1)相当于当前图层转了90°，如图：  
+`注意`:我只将坐标轴的第一象限涂色,canvas图层是一个无限的面，canvas宽高只是限制显示，  
+旋转、平移、缩放等的关键在于坐标轴的变换，旋转90°相当于坐标轴转了90°
+
+![绘制碎圆3.png](https://upload-images.jianshu.io/upload_images/9414344-eb9b9f374967d5bf.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+
+>`canvas.restore()`调用后，  
+图层2将它的结果给了图层1，`挥挥衣袖，不带走一片云彩`，出栈了
+
+![绘制碎圆4.png](https://upload-images.jianshu.io/upload_images/9414344-3ed6e8b5db9ba7da.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+>经过这两个图层的演示，想必你应该明白图层的作用了吧。  
+最后画完之后，图层全合并到root
+
+![绘制碎圆5.png](https://upload-images.jianshu.io/upload_images/9414344-255beba5d2ea8a30.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+---
+
+##### 4.绘制小点
+>画60个点(小线)，每逢5变长，也就是画直线，每次将画布旋转360/60=6°
+
+```
+    private void drawDot(Canvas canvas) {
+        for (int i = 0; i < 60; i++) {
+            if (i % 5 == 0) {
+                canvas.save();
+                canvas.rotate(30 * i);
+                mMainPaint.setStrokeWidth(8);
+                mMainPaint.setColor(ColUtils.randomRGB());
+                canvas.drawLine(250, 0, 300, 0, mMainPaint);
+
+                mMainPaint.setStrokeWidth(10);
+                mMainPaint.setColor(Color.BLACK);
+                canvas.drawPoint(250, 0, mMainPaint);
+                canvas.restore();
+            } else {
+                canvas.save();
+                canvas.rotate(6 * i);
+                mMainPaint.setStrokeWidth(4);
+                mMainPaint.setColor(Color.BLUE);
+                canvas.drawLine(280, 0, 300, 0, mMainPaint);
+                canvas.restore();
+            }
+        }
+    }
+```
+
+
+![点绘制.png](https://upload-images.jianshu.io/upload_images/9414344-bedb96bd75120295.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+
+
+
+
+---
+
+##### 5.绘制时针：
+
+```
+ /**
+     * 绘制时针
+     *
+     * @param canvas
+     */
+    private void drawH(Canvas canvas) {
+
+        canvas.save();
+        canvas.rotate(40);
+        mMainPaint.setColor(Color.parseColor("#8FC552"));
+        mMainPaint.setStrokeCap(Paint.Cap.ROUND);
+        mMainPaint.setStrokeWidth(8);
+        canvas.drawLine(0, 0, 150, 0, mMainPaint);
+        canvas.restore();
+    }
+```
+
+##### 6.绘制分针：
+
+```
+    /**
+     * 绘制分针
+     * @param canvas
+     * @param deg
+     */
+    private void drawM(Canvas canvas) {
+        canvas.save();
+        canvas.rotate(120);
+        mMainPaint.setColor(Color.parseColor("#87B953"));
+        mMainPaint.setStrokeWidth(8);
+        canvas.drawLine(0, 0, 200, 0, mMainPaint);
+        mMainPaint.setColor(Color.GRAY);
+        mMainPaint.setStrokeWidth(30);
+        canvas.drawPoint(0, 0, mMainPaint);
+        canvas.restore();
+    }
+```
+
+##### 7.绘制秒针
+
+```
+    /**
+     * 绘制秒针
+     *
+     * @param canvas
+     * @param deg
+     */
+    private void drawS(Canvas canvas, float deg) {
+        mMainPaint.setStyle(Paint.Style.STROKE);
+        mMainPaint.setColor(Color.parseColor("#6B6B6B"));
+        mMainPaint.setStrokeWidth(8);
+        mMainPaint.setStrokeCap(Paint.Cap.SQUARE);
+
+        canvas.save();
+        canvas.rotate(deg);
+
+        canvas.save();
+        canvas.rotate(45);
+        //使用path绘制：在init里初始化一下就行了
+        mMainPath.addArc(-25, -25, 25, 25, 0, 240);
+        canvas.drawPath(mMainPath, mMainPaint);
+        canvas.restore();
+
+        mMainPaint.setStrokeCap(Paint.Cap.ROUND);
+        canvas.drawLine(-25, 0, -50, 0, mMainPaint);
+
+        mMainPaint.setStrokeWidth(2);
+        mMainPaint.setColor(Color.BLACK);
+        canvas.drawLine(0, 0, 320, 0, mMainPaint);
+
+        mMainPaint.setStrokeWidth(15);
+        mMainPaint.setColor(Color.parseColor("#8FC552"));
+        canvas.drawPoint(0, 0, mMainPaint);
+        canvas.restore();
+    }
+
+```
+
+![时针.png](https://upload-images.jianshu.io/upload_images/9414344-3f5c7a612f5c58de.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+
+---
+
+##### 8.添加文字
+
+```
+/**
+ * 添加文字
+ * @param canvas
+ */
+private void drawText(Canvas canvas) {
+    mMainPaint.setTextSize(60);
+    mMainPaint.setStrokeWidth(5);
+    mMainPaint.setStyle(Paint.Style.FILL);
+    mMainPaint.setTextAlign(Paint.Align.CENTER);
+    mMainPaint.setColor(Color.BLUE);
+    canvas.drawText("Ⅲ", 350, 30, mMainPaint);
+    canvas.drawText("Ⅵ", 0, 350 + 30, mMainPaint);
+    canvas.drawText("Ⅸ", -350, 30, mMainPaint);
+    canvas.drawText("Ⅻ", 0, -350 + 30, mMainPaint);
+    //使用外置字体放在assets目录下
+    Typeface myFont = Typeface.createFromAsset(getContext().getAssets(), "CHOPS.TTF");
+    mMainPaint.setTypeface(myFont);
+    mMainPaint.setTextSize(70);
+    canvas.drawText("Toly", 0, -150, mMainPaint);
+}
+```
+
+
+![效果.png](https://upload-images.jianshu.io/upload_images/9414344-97017c6fc305c1ae.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+>好了，静态效果实现了，现在让它动起来吧
+
+
+---
+#### 三、让表动起来
+
+##### 1.显示当前时间：
+
+>表的旋转角度由每个针绘制是的`canvas.rotate(XXX);`决定，  
+那么动态改变旋转的角度不就行了吗!
+看下面一道数学题:
+
+```
+11:12:45秒，时针、分针、秒针的指针各与中心水平线的夹角?
+答：
+秒针：45 / 12.f * 360 - 90
+分针：12 / 60.f * 360 - 90 + 45 / 60.f * 1
+时针：11 / 60.f * 360 - 90 + 12 / 60.f * 30 + 45 / 3600.f * 30
+```
+
+##### 2.动态更新角度：绘制指针的三个函数,加角度参数
+
+```
+Calendar calendar = Calendar.getInstance();
+int hour = calendar.get(Calendar.HOUR_OF_DAY);
+int min = calendar.get(Calendar.MINUTE);
+int sec = calendar.get(Calendar.SECOND);
+
+drawS(canvas, hour / 60.f * 360 - 90 + min / 60.f * 30 + sec / 3600.f * 30);
+drawM(canvas, min / 60.f * 360 - 90 + sec / 60.f);
+drawH(canvas, sec / 60.f * 360 - 90);
+```
+
+![时间.png](https://upload-images.jianshu.io/upload_images/9414344-e0e804a92470f403.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+---
+
+##### 3.现在每次进来，都会更新时间了,怎么自动更新呢?
+>循环的黄金搭档：`Handler + Timer` 
+
+```
+public class ClockActivity extends AppCompatActivity {
+
+    /**
+     * 新建Handler
+     */
+    Handler mHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            mView.invalidate();//处理：刷新视图
+        }
+    };
+
+    private View mView;
+    private Timer timer = new Timer();
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_toly_clock);
+        ButterKnife.bind(this);
+
+        mView = findViewById(R.id.id_toly_clock);
+
+        TimerTask timerTask = new TimerTask() {
+            @Override
+            public void run() {
+                mHandler.sendEmptyMessage(0);//发送消息
+            }
+        };
+        //定时任务
+        timer.schedule(timerTask, 0, 1000);
+    }
+}
+```
+
+![表.gif](https://upload-images.jianshu.io/upload_images/9414344-e7a3f0628b0c5b46.gif?imageMogr2/auto-orient/strip)
+
+>ok，完结散花(分析图画的真要命...)
 
 ---
 
@@ -740,8 +388,7 @@ path.cubicTo(100, 100, 300, -300, 600, 0);
 ##### 1.本文成长记录及勘误表
 项目源码 | 日期|备注
 ---|---|---
-V0.1--无|2018-11-6|[Android关于Path你所知道的和不知道的一切](https://www.jianshu.com/p/d080579ae048)
-
+[V0.1--github](https://github.com/toly1994328/TolyClock)|2018-11-8|[Android原生绘图之一起画个表](https://www.jianshu.com/p/706f1294077b)
 
 ##### 2.更多关于我
 
@@ -759,3 +406,224 @@ V0.1--无|2018-11-6|[Android关于Path你所知道的和不知道的一切](http
 ---
 
 ![icon_wx_200.png](https://upload-images.jianshu.io/upload_images/9414344-8a0c95a090041a0d.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+
+#### 附录：网格+坐标系绘制工具：
+
+##### 1.HelpDraw
+
+```
+/**
+ * 作者：张风捷特烈<br/>
+ * 时间：2018/11/5 0005:8:43<br/>
+ * 邮箱：1981462002@qq.com<br/>
+ * 说明：辅助画布
+ */
+public class HelpDraw {
+
+    /**
+     * 获取屏幕尺寸
+     */
+    public static Point getWinSize(Context context) {
+        Point point = new Point();
+        Utils.loadWinSize(context, point);
+        return point;
+    }
+
+    /**
+     * 绘制网格
+     */
+    public static Picture getGrid(Context context) {
+        return getGrid(getWinSize(context));
+    }
+
+    /**
+     * 绘制坐标系
+     */
+    public static Picture getCoo(Context context, Point coo) {
+        return getCoo(coo, getWinSize(context));
+    }
+
+
+    /**
+     * 绘制网格
+     *
+     * @param winSize 屏幕尺寸
+     */
+    private static Picture getGrid(Point winSize) {
+
+        Picture picture = new Picture();
+        Canvas recording = picture.beginRecording(winSize.x, winSize.y);
+        //初始化网格画笔
+        Paint paint = new Paint();
+        paint.setStrokeWidth(2);
+        paint.setColor(Color.GRAY);
+        paint.setStyle(Paint.Style.STROKE);
+        //设置虚线效果new float[]{可见长度, 不可见长度},偏移值
+        paint.setPathEffect(new DashPathEffect(new float[]{10, 5}, 0));
+        recording.drawPath(HelpPath.gridPath(50, winSize), paint);
+        return picture;
+
+    }
+
+    /**
+     * 绘制坐标系
+     *
+     * @param coo     坐标系原点
+     * @param winSize 屏幕尺寸
+     */
+    private static Picture getCoo(Point coo, Point winSize) {
+        Picture picture = new Picture();
+        Canvas recording = picture.beginRecording(winSize.x, winSize.y);
+        //初始化网格画笔
+        Paint paint = new Paint();
+        paint.setStrokeWidth(4);
+        paint.setColor(Color.BLACK);
+        paint.setStyle(Paint.Style.STROKE);
+        //设置虚线效果new float[]{可见长度, 不可见长度},偏移值
+        paint.setPathEffect(null);
+
+        //绘制直线
+        recording.drawPath(HelpPath.cooPath(coo, winSize), paint);
+        //左箭头
+        recording.drawLine(winSize.x, coo.y, winSize.x - 40, coo.y - 20, paint);
+        recording.drawLine(winSize.x, coo.y, winSize.x - 40, coo.y + 20, paint);
+        //下箭头
+        recording.drawLine(coo.x, winSize.y, coo.x - 20, winSize.y - 40, paint);
+        recording.drawLine(coo.x, winSize.y, coo.x + 20, winSize.y - 40, paint);
+        //为坐标系绘制文字
+        drawText4Coo(recording, coo, winSize, paint);
+        return picture;
+    }
+
+    /**
+     * 为坐标系绘制文字
+     *
+     * @param canvas  画布
+     * @param coo     坐标系原点
+     * @param winSize 屏幕尺寸
+     * @param paint   画笔
+     */
+    private static void drawText4Coo(Canvas canvas, Point coo, Point winSize, Paint paint) {
+        //绘制文字
+        paint.setTextSize(50);
+        canvas.drawText("x", winSize.x - 60, coo.y - 40, paint);
+        canvas.drawText("y", coo.x - 40, winSize.y - 60, paint);
+        paint.setTextSize(25);
+        //X正轴文字
+        for (int i = 1; i < (winSize.x - coo.x) / 50; i++) {
+            paint.setStrokeWidth(2);
+            canvas.drawText(100 * i + "", coo.x - 20 + 100 * i, coo.y + 40, paint);
+            paint.setStrokeWidth(5);
+            canvas.drawLine(coo.x + 100 * i, coo.y, coo.x + 100 * i, coo.y - 10, paint);
+        }
+
+        //X负轴文字
+        for (int i = 1; i < coo.x / 50; i++) {
+            paint.setStrokeWidth(2);
+            canvas.drawText(-100 * i + "", coo.x - 20 - 100 * i, coo.y + 40, paint);
+            paint.setStrokeWidth(5);
+            canvas.drawLine(coo.x - 100 * i, coo.y, coo.x - 100 * i, coo.y - 10, paint);
+        }
+
+        //y正轴文字
+        for (int i = 1; i < (winSize.y - coo.y) / 50; i++) {
+            paint.setStrokeWidth(2);
+            canvas.drawText(100 * i + "", coo.x + 20, coo.y + 10 + 100 * i, paint);
+            paint.setStrokeWidth(5);
+            canvas.drawLine(coo.x, coo.y + 100 * i, coo.x + 10, coo.y + 100 * i, paint);
+        }
+
+        //y负轴文字
+        for (int i = 1; i < coo.y / 50; i++) {
+            paint.setStrokeWidth(2);
+            canvas.drawText(-100 * i + "", coo.x + 20, coo.y + 10 - 100 * i, paint);
+            paint.setStrokeWidth(5);
+            canvas.drawLine(coo.x, coo.y - 100 * i, coo.x + 10, coo.y - 100 * i, paint);
+        }
+    }
+}
+```
+
+##### 2.HelpPath
+
+```
+/**
+ * 作者：张风捷特烈<br/>
+ * 时间：2018/11/5 0005:8:05<br/>
+ * 邮箱：1981462002@qq.com<br/>
+ * 说明：辅助分析路径
+ */
+public class HelpPath {
+
+    /**
+     * 绘制网格:注意只有用path才能绘制虚线
+     *
+     * @param step    小正方形边长
+     * @param winSize 屏幕尺寸
+     */
+    public static Path gridPath(int step, Point winSize) {
+
+        Path path = new Path();
+
+        for (int i = 0; i < winSize.y / step + 1; i++) {
+            path.moveTo(0, step * i);
+            path.lineTo(winSize.x, step * i);
+        }
+
+        for (int i = 0; i < winSize.x / step + 1; i++) {
+            path.moveTo(step * i, 0);
+            path.lineTo(step * i, winSize.y);
+        }
+        return path;
+    }
+
+    /**
+     * 坐标系路径
+     *
+     * @param coo     坐标点
+     * @param winSize 屏幕尺寸
+     * @return 坐标系路径
+     */
+    public static Path cooPath(Point coo, Point winSize) {
+        Path path = new Path();
+        //x正半轴线
+        path.moveTo(coo.x, coo.y);
+        path.lineTo(winSize.x, coo.y);
+        //x负半轴线
+        path.moveTo(coo.x, coo.y);
+        path.lineTo(coo.x - winSize.x, coo.y);
+        //y负半轴线
+        path.moveTo(coo.x, coo.y);
+        path.lineTo(coo.x, coo.y - winSize.y);
+        //y负半轴线
+        path.moveTo(coo.x, coo.y);
+        path.lineTo(coo.x, winSize.y);
+        return path;
+    }
+}
+```
+
+##### 3.Utils
+
+```
+public class Utils {
+    /**
+     * 获得屏幕高度
+     *
+     * @param ctx 上下文
+     * @param winSize 屏幕尺寸
+     */
+    public static void loadWinSize(Context ctx, Point winSize) {
+        WindowManager wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
+        DisplayMetrics outMetrics = new DisplayMetrics();
+        if (wm != null) {
+            wm.getDefaultDisplay().getMetrics(outMetrics);
+        }
+        winSize.x = outMetrics.widthPixels;
+        winSize.y = outMetrics.heightPixels;
+    }
+
+}
+
+```
